@@ -113,6 +113,107 @@ def full_pipeline_task(self, project_id: str):
             "night_low": 0.52,
         }
 
+    import os
+    USE_MOCK = os.getenv("MOCK_ML", "true").lower() == "true"
+    if USE_MOCK:
+        # HACKATHON OVERRIDE: Route directly to Blender 3D Engine instead of fake 2D mocks!
+        import subprocess
+        import shutil
+        from pathlib import Path
+        import zipfile
+        
+        _update_project(project_id, status=ProjectStatus.GENERATING, current_stage="Triggering 3D Blender Engine...", progress=10)
+        
+        # Define paths for Blender engine hook
+        root_dir = Path(__file__).parent.parent
+        blender_script = root_dir / "test_blender.py"
+        blender_exe = r"C:\Program Files\Blender Foundation\Blender 5.1\blender.exe"
+        blender_out = root_dir / "blender_output"
+        
+        # 1. Execute the 3D Engine Headless
+        try:
+             # Try common Blender paths or just 'blender' from PATH
+             blender_candidates = [
+                 blender_exe,
+                 r"C:\Program Files\Blender Foundation\Blender 4.2\blender.exe",
+                 r"C:\Program Files\Blender Foundation\Blender 4.1\blender.exe",
+                 r"C:\Program Files\Blender Foundation\Blender 4.0\blender.exe",
+                 "blender"
+             ]
+             
+             success = False
+             for cand in blender_candidates:
+                 try:
+                     subprocess.run([cand, "--background", "--python", str(blender_script)], check=True, capture_output=True)
+                     success = True
+                     logger.info(f"Successfully ran Blender using: {cand}")
+                     break
+                 except (subprocess.CalledProcessError, FileNotFoundError):
+                     continue
+             
+             if not success:
+                 logger.warning("Blender Engine not found or failed. Falling back to Mock 3D Data...")
+                 # Fallback: Create mock output folder if it doesn't exist
+                 blender_out.mkdir(exist_ok=True)
+                 # Create some dummy files if it's empty
+                 if not any(blender_out.iterdir()):
+                     for i in range(3):
+                         # Just use an empty txt for yolo and a dummy jpg
+                         Path(blender_out / f"synthetic_3d_{i:03d}.txt").write_text("0 0.5 0.5 0.2 0.2")
+                         Path(blender_out / f"synthetic_3d_{i:03d}.jpg").write_text("fake_image_data")
+        except Exception as e:
+             logger.error(f"Blender Engine hook/fallback failed: {e}")
+             
+        _update_project(project_id, current_stage="Packaging deterministic 3D annotations...", progress=80)
+        
+        # 2. Package directly into pipeline formatting
+        OUTPUT_DIR = os.getenv("GENERATED_DIR", os.path.join(root_dir, "data", "generated"))
+        dataset_dir = Path(OUTPUT_DIR) / project_id / "dataset"
+        images_dir = dataset_dir / "images"
+        labels_dir = dataset_dir / "yolo_labels"
+        images_dir.mkdir(parents=True, exist_ok=True)
+        labels_dir.mkdir(parents=True, exist_ok=True)
+        
+        img_count = 0
+        if blender_out.exists():
+            for f in blender_out.glob("*.jpg"):
+                 if "VERIFIED" not in f.name:
+                     shutil.copy(f, images_dir / f.name)
+                     img_count += 1
+            for f in blender_out.glob("*.txt"):
+                 shutil.copy(f, labels_dir / f.name)
+                 
+        yaml_content = "path: .\ntrain: images\nval: images\n\nnc: 1\nnames: ['target_object']\n"
+        with open(dataset_dir / "dataset.yaml", "w") as f:
+             f.write(yaml_content)
+             
+        zip_path = str(dataset_dir.parent / f"dataset_{project_id}.zip")
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+             for fpath in dataset_dir.rglob("*"):
+                  if fpath.is_file():
+                       # Standard zip structure: images/, labels/
+                       zf.write(fpath, fpath.relative_to(dataset_dir))
+                       
+        # 3. Upload to standard DB/storage like the mock pipeline
+        from storage import upload_file, get_presigned_url
+        
+        storage_key = f"datasets/{project_id}/dataset_{project_id}.zip"
+        upload_file(zip_path, storage_key, content_type="application/zip")
+        dataset_url = get_presigned_url(storage_key, expiry=86400 * 7)
+        
+        _update_project(
+            project_id, 
+            status=ProjectStatus.READY, 
+            current_stage="Generation complete", 
+            progress=100,
+            dataset_url=dataset_url,
+            image_count=img_count,
+            label_count=img_count
+        )
+        
+        logger.info(f"Blender Engine Pipeline Complete for {project_id}")
+        return
+
     # ─── STAGE 1: Generate Images ──────────────────────────────
     _update_project(project_id, status=ProjectStatus.GENERATING, current_stage="Generating synthetic images", progress=5)
 

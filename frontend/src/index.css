@@ -1,25 +1,58 @@
-@import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700&family=Syne:wght@400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap');
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-* { box-sizing: border-box; }
+@layer base {
+  body {
+    @apply bg-[#f7f9fb] text-[#191c1e] antialiased;
+    background-image: radial-gradient(#c5c6cf 0.5px, transparent 0.5px);
+    background-size: 24px 24px;
+    font-family: 'Inter', sans-serif;
+  }
 
-body {
-  margin: 0; padding: 0;
-  background-color: #0a0c0f;
-  color: #e8eaf0;
-  font-family: 'Inter', sans-serif;
-  -webkit-font-smoothing: antialiased;
+  h1, h2, h3, h4, h5, h6 {
+    @apply tracking-tight;
+  }
 }
 
-::-webkit-scrollbar { width: 6px; height: 6px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
+@layer components {
+  .font-display { font-family: 'Syne', sans-serif; font-weight: 700; }
+  .font-headline { font-family: 'Syne', sans-serif; }
+  .font-body { font-family: 'Inter', sans-serif; }
+  .font-technical { font-family: 'Space Grotesk', sans-serif; }
+  
+  .tracking-extrawide { letter-spacing: 0.25em; }
+  .tracking-tight-caps { letter-spacing: -0.02em; }
 
-::selection { background: rgba(0,229,160,0.2); color: #e8eaf0; }
+  
+  .glass-panel {
+    background: rgba(255, 255, 255, 0.7);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+  }
 
-.font-display { font-family: 'Syne', sans-serif; }
-.font-mono    { font-family: 'IBM Plex Mono', monospace; }
+  .text-spike-purple { 
+    background: linear-gradient(to right, #263a61, #6200EE); 
+    -webkit-background-clip: text; 
+    -webkit-text-fill-color: transparent; 
+  }
+}
+
+@layer utilities {
+  @keyframes scan {
+    0%, 100% { transform: translateY(0); opacity: 0; }
+    50% { transform: translateY(200px); opacity: 1; }
+  }
+  @keyframes move-gradient {
+    0% { background-position: 0% 50%; }
+    100% { background-position: 200% 50%; }
+  }
+}
+
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: #f1f3f5; }
+::-webkit-scrollbar-thumb { background: #c5c6cf; border-radius: 10px; }
+::selection { background: #d8e2ff; color: #021a41; }
