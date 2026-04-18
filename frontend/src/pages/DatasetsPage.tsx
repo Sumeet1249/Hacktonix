@@ -83,7 +83,7 @@ export default function DatasetsPage() {
               </div>
             </div>
             <div className="text-right">
-              <span className="font-label text-[10px] uppercase tracking-[0.2em] text-slate-400">Dataset ID: AX-{id?.slice(-3).toUpperCase()}-ALPHA</span>
+              <span className="font-label text-[10px] uppercase tracking-[0.2em] text-slate-400">Dataset ID: AX-{id?.slice(-3).toUpperCase() || 'XXX'}-ALPHA</span>
             </div>
           </div>
 
@@ -101,15 +101,15 @@ export default function DatasetsPage() {
 
                 <div className="grid grid-cols-4 gap-4 mb-8">
                   {/* Real project seed images */}
-                  {project.seed_images.slice(0, 4).map((si) => (
+                  {(project.seed_images || []).slice(0, 4).map((si) => (
                     <div key={si.id} className="relative group aspect-square rounded-lg overflow-hidden bg-slate-100 border border-slate-200">
                       <img className="w-full h-full object-cover grayscale group-hover:grayscale-0 transition-all duration-500" src={si.url} alt={si.filename} />
                       <div className="absolute inset-0 border-2 border-primary opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"></div>
-                      <div className="absolute bottom-1 right-1 text-[8px] bg-primary text-white px-1 font-mono uppercase truncate max-w-full">HEX: {si.id.slice(-3)}</div>
+                      <div className="absolute bottom-1 right-1 text-[8px] bg-primary text-white px-1 font-mono uppercase truncate max-w-full">HEX: {si.id?.slice(-3) || '??'}</div>
                     </div>
                   ))}
                   {/* Fill empty spots if less than 4 */}
-                  {project.seed_images.length < 4 && Array.from({ length: 4 - project.seed_images.length }).map((_, i) => (
+                  {(project.seed_images || []).length < 4 && Array.from({ length: 4 - (project.seed_images || []).length }).map((_, i) => (
                     <div key={i} className="aspect-square rounded-lg bg-slate-50 border border-dashed border-slate-200 flex items-center justify-center">
                       <Zap size={20} className="text-slate-200" />
                     </div>
