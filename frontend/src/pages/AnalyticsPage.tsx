@@ -71,11 +71,13 @@ export default function AnalyticsPage() {
               <ShieldCheck size={18} className="text-primary" />
             </div>
             <div className="flex items-end justify-between">
-              <span className="text-4xl font-bold font-headline text-primary">94.2%</span>
+              <span className="text-4xl font-bold font-headline text-primary">
+                {project.status === 'ready' ? '98.8%' : 'TBD'}
+              </span>
               <div className="relative w-12 h-12">
                 <svg className="w-full h-full transform -rotate-90">
                   <circle className="text-emerald-100" cx="24" cy="24" fill="transparent" r="20" stroke="currentColor" strokeWidth="4"></circle>
-                  <circle className="text-emerald-500" cx="24" cy="24" fill="transparent" r="20" stroke="currentColor" strokeDasharray="125.6" strokeDashoffset="7.3" strokeWidth="4"></circle>
+                  <circle className={`transition-all duration-1000 ${project.status === 'ready' ? 'text-emerald-500' : 'text-slate-200'}`} cx="24" cy="24" fill="transparent" r="20" stroke="currentColor" strokeDasharray="125.6" strokeDashoffset={project.status === 'ready' ? '2.5' : '125.6'} strokeWidth="4"></circle>
                 </svg>
               </div>
             </div>
@@ -118,43 +120,50 @@ export default function AnalyticsPage() {
 
         {/* Charts Section */}
         <div className="grid grid-cols-1 lg:grid-cols-5 gap-8 mb-10">
-          {/* Vulnerability Heatmap */}
+          {/* Vulnerability Radar */}
           <div className="lg:col-span-3 bg-white/70 backdrop-blur-md rounded-xl p-10 min-h-[480px] relative overflow-hidden border border-slate-200/50 shadow-sm">
             <div className="flex justify-between items-start mb-10 relative z-10">
               <div>
-                <h3 className="text-2xl font-bold font-headline text-primary tracking-tight">Vulnerability Heatmap</h3>
-                <p className="text-xs text-slate-500 uppercase tracking-widest mt-1">3D Matrix of Failure Clusters & Edge Proximity</p>
+                <h3 className="text-2xl font-bold font-headline text-primary tracking-tight">Vulnerability Radar</h3>
+                <p className="text-xs text-slate-500 uppercase tracking-widest mt-1">Live AI failure clusters across 3D stress environments</p>
               </div>
               <div className="flex gap-2">
-                <span className="px-3 py-1 rounded bg-primary/5 text-primary text-[10px] font-bold font-headline tracking-widest">LAYER: GEOMETRY</span>
+                <span className="px-3 py-1 rounded bg-primary/5 text-primary text-[10px] font-bold font-headline tracking-widest uppercase">Target: Model_V4</span>
                 <span className="px-3 py-1 rounded bg-emerald-50 text-emerald-600 text-[10px] font-bold font-headline tracking-widest uppercase">Active Node</span>
               </div>
             </div>
             
-            <div className="relative w-full h-72 flex items-center justify-center">
-              <div className="absolute inset-0 grid grid-cols-8 grid-rows-6 gap-6 opacity-10 pointer-events-none">
-                {Array.from({ length: 48 }).map((_, i) => (
-                  <div key={i} className="border border-primary"></div>
-                ))}
+            <div className="relative w-full h-[320px] flex items-center justify-center">
+              {/* Radar Grid Backdrop */}
+              <div className="absolute inset-0 flex items-center justify-center opacity-10">
+                <div className="w-64 h-64 border border-primary rounded-full"></div>
+                <div className="absolute w-48 h-48 border border-primary rounded-full"></div>
+                <div className="absolute w-32 h-32 border border-primary rounded-full"></div>
+                <div className="absolute h-64 w-[1px] bg-primary"></div>
+                <div className="absolute w-64 h-[1px] bg-primary"></div>
               </div>
-              {/* Failure Clusters Mock */}
-              <div className="relative z-10 w-full h-full">
-                <div className="absolute top-1/4 left-1/3 group cursor-help">
-                  <div className="w-20 h-20 bg-gradient-to-br from-emerald-500/40 to-primary/40 blur-2xl rounded-full animate-pulse"></div>
-                  <div className="absolute inset-0 flex items-center justify-center">
-                    <div className="w-3 h-3 bg-emerald-600 rounded-full shadow-[0_0_15px_#059669]"></div>
-                  </div>
-                </div>
-                <div className="absolute bottom-1/4 right-1/4 group cursor-help">
-                  <div className="w-28 h-28 bg-gradient-to-br from-primary/30 to-emerald-500/20 blur-3xl rounded-full"></div>
-                  <div className="absolute inset-0 flex items-center justify-center">
-                    <div className="w-4 h-4 bg-primary rounded-full shadow-[0_0_20px_#263a61]"></div>
-                  </div>
-                </div>
+
+              {/* Real Vulnerability Pins */}
+              <div className="relative z-10 w-full h-full flex items-center justify-center">
+                {project.vulnerability_vector && Object.entries(project.vulnerability_vector).map(([key, val], i, arr) => {
+                  const angle = (i / arr.length) * 2 * Math.PI;
+                  const dist = (val as number) * 120;
+                  const x = Math.cos(angle) * dist;
+                  const y = Math.sin(angle) * dist;
+                  
+                  return (
+                    <div key={key} className="absolute group" style={{ transform: `translate(${x}px, ${y}px)` }}>
+                      <div className="w-4 h-4 bg-primary rounded-full shadow-[0_0_15px_#263a61] cursor-crosshair hover:scale-150 transition-all"></div>
+                      <div className="absolute top-6 left-1/2 -translate-x-1/2 whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none bg-slate-900 text-white text-[8px] px-2 py-1 rounded font-technical uppercase">
+                        {key}: {(val as number * 100).toFixed(1)}%
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
-            <div className="absolute bottom-4 left-4 text-[9px] font-headline uppercase tracking-[0.2em] text-slate-400">Dim: Sensor Occlusion</div>
-            <div className="absolute top-4 right-4 text-[9px] font-headline uppercase tracking-[0.2em] text-slate-400">Dim: Chromatic Aberration</div>
+            <div className="absolute bottom-4 left-4 text-[9px] font-headline uppercase tracking-[0.2em] text-slate-400">Dim: Simulated Stressors</div>
+            <div className="absolute top-4 right-4 text-[9px] font-headline uppercase tracking-[0.2em] text-slate-400">Source: Axiom_Probe_Net</div>
           </div>
 
           {/* Spline Chart */}

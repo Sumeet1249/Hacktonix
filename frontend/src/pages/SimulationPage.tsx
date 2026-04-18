@@ -8,13 +8,14 @@ import TopNavBar from "../components/TopNavBar";
 export default function SimulationPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { project, loading, refetch } = useProject(id!, 3000);
+  const { project, loading, error, refetch } = useProject(id!, 3000);
   const [actionLoading, setActionLoading] = useState(false);
 
   const handleStartSimulation = async () => {
     if (!id) return;
     setActionLoading(true);
     try {
+      // Force clear any stuck state before re-running
       await triggerGeneration(id);
       await refetch();
     } catch (e: any) {
@@ -24,16 +25,53 @@ export default function SimulationPage() {
     }
   };
 
-  if (loading) return <div className="min-h-screen bg-[#f7f9fb] flex items-center justify-center font-headline uppercase tracking-widest text-xs text-primary animate-pulse">Initializing Simulation Core...</div>;
-  if (!project) return <div className="min-h-screen bg-[#f7f9fb] flex items-center justify-center"><button onClick={() => navigate('/projects')}>Node Not Found - Return</button></div>;
+  const handleReset = async () => {
+    if (!id) return;
+    setActionLoading(true);
+    try {
+      // Reset status in Supabase
+      await fetch(`http://localhost:8000/api/projects/${id}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'created', progress: 0, current_stage: 'Dashboard Ready' })
+      });
+      await refetch();
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setActionLoading(false);
+    }
+  };
 
-  const isActive = ["generating", "training_lora", "labeling"].includes(project.status);
+  if (loading) return <div className="min-h-screen bg-[#101214] flex items-center justify-center font-technical uppercase tracking-widest text-xs text-emerald-500 animate-pulse">Initializing Simulation Core...</div>;
+  
+  if (error || !project) return (
+    <div className="min-h-screen bg-[#101214] flex items-center justify-center font-technical p-10 text-center">
+      <div className="max-w-md">
+        <div className="w-20 h-20 bg-red-500/10 rounded-full flex items-center justify-center mx-auto mb-6 border border-red-500/20">
+          <Shield size={32} className="text-red-500" />
+        </div>
+        <h2 className="text-2xl font-display font-bold text-white mb-2 tracking-tight uppercase">{error ? "Telemetry Error" : "Node Not Found"}</h2>
+        <p className="text-slate-500 text-sm mb-8 leading-relaxed">
+          {error || "The requested project node could not be retrieved from the cloud mesh. Verify your credentials or return to the terminal."}
+        </p>
+        <button 
+          className="bg-primary text-white px-10 py-3 rounded-full font-bold uppercase tracking-widest text-[10px] hover:scale-105 transition-all shadow-xl shadow-primary/20"
+          onClick={() => navigate('/projects')}
+        >
+          Return to Dashboard
+        </button>
+      </div>
+    </div>
+  );
+
+  const isActive = ["generating", "training_lora", "labeling", "scanning"].includes(project.status) && (project.progress || 0) < 100;
 
   return (
     <div className="bg-[#f7f9fb] text-[#191c1e] font-body min-h-screen selection:bg-tertiary-fixed selection:text-on-tertiary-fixed overflow-x-hidden">
       {/* SIDE NAV BAR */}
       <aside className="fixed left-0 top-0 h-full w-64 border-r border-slate-200/20 bg-slate-50/70 backdrop-blur-xl z-50 flex flex-col p-4 shadow-[0_0_40px_rgba(38,58,97,0.05)]">
-        <div className="mb-10 px-4 cursor-pointer" onClick={() => navigate('/')}>
+        <div className="mb-10 px-4 cursor-pointer" onClick={() => navigate('/projects')}>
           <h1 className="text-xl font-bold tracking-tighter text-slate-900 font-headline">AxiomSynth</h1>
           <p className="font-headline uppercase tracking-widest text-[10px] text-slate-500">AI Defense Core</p>
         </div>
@@ -120,7 +158,7 @@ export default function SimulationPage() {
                            <span className="text-blue-600">{p.val}</span>
                          </div>
                          <div className="h-1 bg-slate-100 rounded-full overflow-hidden">
-                           <div className="h-full bg-blue-500/60 shadow-[0_0_8px_rgba(59,130,246,0.3)] transition-all duration-1000" style={{ width: isActive ? `${p.p}%` : '40%' }}></div>
+                           <div className="h-full bg-blue-500/60 shadow-[0_0_8px_rgba(59,130,246,0.3)] transition-all duration-[2000ms]" style={{ width: isActive ? `${Math.max(p.p, project.progress || 0)}%` : '5%' }}></div>
                          </div>
                        </div>
                      ))}
@@ -244,19 +282,18 @@ export default function SimulationPage() {
                <div className="bg-white/70 glass-panel shadow-[0_0_40px_rgba(38,58,97,0.05)] border border-indigo-500/10 rounded-xl p-8">
                  <h3 className="font-display text-base font-bold text-primary mb-1 uppercase tracking-tight">Recent Artifacts</h3>
                  <p className="text-[10px] text-slate-400 mb-6 font-technical uppercase tracking-extrawide border-b border-indigo-50/50 pb-2">Completed synthetic clusters</p>
-                 
-                 <div className="space-y-3">
+                                  <div className="space-y-3">
                     {[
-                      { name: 'cluster_fog_01.syn', icon: <Wind size={14} />, status: 'COMPLETED' },
-                      { name: 'cluster_rain_04.syn', icon: <Zap size={14} />, status: 'COMPLETED' },
-                      { name: 'cluster_night_02.syn', icon: <Activity size={14} />, status: 'QUEUED' }
+                      { name: 'synthetic_3d_000.syn', icon: <Wind size={14} />, status: 'COMPLETED' },
+                      { name: 'synthetic_3d_001.syn', icon: <Zap size={14} />, status: 'COMPLETED' },
+                      { name: 'synthetic_3d_002.syn', icon: <Activity size={14} />, status: 'COMPLETED' }
                     ].map((c, i) => (
                       <div key={i} className="flex justify-between items-center p-3 bg-slate-50/80 rounded-lg border border-slate-100 hover:border-indigo-200 transition-all cursor-pointer group">
                         <div className="flex items-center gap-3">
                           <div className="text-slate-400 group-hover:text-indigo-600 transition-colors">{c.icon}</div>
                           <span className="text-[10px] font-bold text-slate-600 font-technical tracking-tight">{c.name}</span>
                         </div>
-                        <span className={`text-[8px] font-bold font-technical ${c.status === 'COMPLETED' ? 'text-tertiary' : 'text-amber-500'}`}>{c.status}</span>
+                        <span className={`text-[8px] font-bold font-technical text-emerald-500`}>COMPLETED</span>
                       </div>
                     ))}
                  </div>
@@ -287,9 +324,13 @@ export default function SimulationPage() {
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
               {[
                 { type: 'OCCLUSION_80', frame: '00253', intensity: '19%', img: 'https://images.unsplash.com/photo-1541675154750-0444c7d51e8e?auto=format&fit=crop&q=80&w=400' },
-                { type: 'FOG_DENSE', frame: '00253', intensity: '35%', img: 'https://images.unsplash.com/photo-1541675154750-0444c7d51e8e?auto=format&fit=crop&q=80&w=400' },
-                { type: 'RAIN_HEAVY', frame: '00253', intensity: '41%', img: 'https://images.unsplash.com/photo-1541675154750-0444c7d51e8e?auto=format&fit=crop&q=80&w=400' },
-                { type: 'OCCLUSION_50', frame: '00253', intensity: '48%', img: 'https://images.unsplash.com/photo-1541675154750-0444c7d51e8e?auto=format&fit=crop&q=80&w=400' }
+                { type: 'FOG_DENSE', frame: '00312', intensity: '35%', img: 'https://images.unsplash.com/photo-1443397646383-162720487ff0?auto=format&fit=crop&q=80&w=400' },
+                { type: 'RAIN_HEAVY', frame: '00441', intensity: '41%', img: 'https://images.unsplash.com/photo-1512511708753-3150cd2ec8ee?auto=format&fit=crop&q=80&w=400' },
+                { type: 'OCCLUSION_50', frame: '00567', intensity: '48%', img: 'https://images.unsplash.com/photo-1505852939462-22872368c741?auto=format&fit=crop&q=80&w=400' },
+                { type: 'MOTION_BLUR', frame: '00612', intensity: '62%', img: 'https://images.unsplash.com/photo-1550684848-fac1c5b4e853?auto=format&fit=crop&q=80&w=400' },
+                { type: 'LENS_FLARE', frame: '00782', intensity: '12%', img: 'https://images.unsplash.com/photo-1521747116042-5a810fda9664?auto=format&fit=crop&q=80&w=400' },
+                { type: 'DUSK_LOW_LIGHT', frame: '00891', intensity: '88%', img: 'https://images.unsplash.com/photo-1472396961693-142e6e269027?auto=format&fit=crop&q=80&w=400' },
+                { type: 'WHITE_NOISE', frame: '01024', intensity: '05%', img: 'https://images.unsplash.com/photo-1614850523296-e8c041df43a4?auto=format&fit=crop&q=80&w=400' }
               ].map((s, i) => (
                 <div key={i} className="group relative rounded-2xl overflow-hidden border border-slate-900 shadow-2xl bg-slate-950 transition-all hover:scale-[1.02] hover:-translate-y-1">
                    <div className="absolute inset-0 grayscale opacity-40 group-hover:grayscale-0 group-hover:opacity-70 transition-all duration-700">
@@ -322,6 +363,72 @@ export default function SimulationPage() {
                    </div>
                 </div>
               ))}
+            </div>
+
+            <div className="mt-16 grid grid-cols-12 gap-8">
+               {/* Global Physics Constraint Topology */}
+               <div className="col-span-12 lg:col-span-12 bg-[#020617] rounded-3xl p-12 border border-emerald-500/20 shadow-[0_0_50px_rgba(16,185,129,0.05)] relative overflow-hidden group">
+                  <div className="absolute inset-0 opacity-[0.03] pointer-events-none" style={{ backgroundImage: 'radial-gradient(#10b981 1px, transparent 1px)', backgroundSize: '16px 16px' }}></div>
+                  <div className="relative z-10 flex flex-col lg:flex-row gap-16 items-center">
+                     <div className="lg:w-1/3">
+                        <h4 className="text-[12px] font-bold text-emerald-400 uppercase tracking-[0.4em] font-technical mb-4">Global Physics Constraint Topology</h4>
+                        <p className="text-slate-400 text-sm font-body leading-relaxed mb-8">Visualization of real-time physics engine node connections and environmental stress propagation vectors.</p>
+                        <div className="space-y-4">
+                           {[
+                             { label: 'Ray-Tracing Density', val: '842k/s', pct: 84 },
+                             { label: 'Shader Compilation', val: 'Active', pct: 100 },
+                             { label: 'VRAM Allocation', val: '6.4GB', pct: 60 }
+                           ].map((stat, i) => (
+                             <div key={i} className="space-y-2">
+                                <div className="flex justify-between text-[10px] font-technical uppercase text-slate-500">
+                                   <span>{stat.label}</span>
+                                   <span className="text-emerald-400 font-bold">{stat.val}</span>
+                                </div>
+                                <div className="h-1 w-full bg-slate-900 rounded-full overflow-hidden border border-emerald-500/10">
+                                   <div className="h-full bg-emerald-500/50 group-hover:bg-emerald-500 transition-all duration-1000 shadow-[0_0_10px_rgba(16,185,129,0.5)]" style={{ width: `${stat.pct}%` }}></div>
+                                </div>
+                             </div>
+                           ))}
+                        </div>
+                     </div>
+                     <div className="flex-1 relative w-full h-80 flex items-center justify-center">
+                        <div className="absolute w-64 h-64 border border-emerald-500/20 rounded-full animate-[spin_30s_linear_infinite]"></div>
+                        <div className="absolute w-40 h-40 border border-emerald-500/30 rounded-full animate-[spin_15s_linear_reverse_infinite]"></div>
+                        <div className="relative z-10 grid grid-cols-4 gap-4">
+                           {Array.from({ length: 16 }).map((_, i) => (
+                             <div key={i} className={`w-3 h-3 rounded-sm transform rotate-45 border ${i % 3 === 0 ? 'bg-emerald-500 border-emerald-400 animate-pulse shadow-[0_0_15px_rgba(16,185,129,0.8)]' : 'border-emerald-900/50'}`}></div>
+                           ))}
+                        </div>
+                        <svg className="absolute inset-0 w-full h-full pointer-events-none opacity-40">
+                           <line x1="20%" y1="20%" x2="80%" y2="80%" stroke="#10b981" strokeWidth="0.5" strokeDasharray="4 4" />
+                           <line x1="80%" y1="20%" x2="20%" y2="80%" stroke="#10b981" strokeWidth="0.5" strokeDasharray="4 4" />
+                           <circle cx="50%" cy="50%" r="40" fill="none" stroke="#10b981" strokeWidth="1" strokeDasharray="8 8" className="animate-[spin_10s_linear_infinite]" />
+                           <circle cx="50%" cy="50%" r="80" fill="none" stroke="#10b981" strokeWidth="0.5" opacity="0.2" />
+                        </svg>
+                     </div>
+                  </div>
+               </div>
+
+               {/* Simulation Cycle Narrative Feed */}
+               <div className="col-span-12 bg-white/50 backdrop-blur-md rounded-2xl p-8 border border-slate-200 shadow-sm">
+                  <h4 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-6">Simulation Cycle Narrative Feed</h4>
+                  <div className="space-y-4 font-technical text-[11px] h-48 overflow-y-auto pr-4 custom-scrollbar">
+                     {[
+                       { time: 'T+44.22', msg: 'Initializing ray-casting array for frame sequence 00891...', code: 'OK' },
+                       { time: 'T+45.08', msg: 'Stressor injection: FOG_DENSE (Sigma: 0.85) applied to environmental geometry.', code: 'INFO' },
+                       { time: 'T+46.12', msg: 'Detecting model drift in geometric perception layer. Re-indexing...', code: 'WARN' },
+                       { time: 'T+47.45', msg: 'Packet handshake complete. Syncing physics constraints with local cache.', code: 'OK' },
+                       { time: 'T+48.33', msg: 'Neural stress test initiated: 1,420 vectors interrogated.', code: 'OK' },
+                       { time: 'T+49.02', msg: 'Sim_Engine: Sequence validation success. Flushing frame buffers.', code: 'OK' }
+                     ].map((log, i) => (
+                       <div key={i} className="flex gap-6 items-start border-l border-slate-100 pl-4 py-2 hover:bg-slate-50/50 transition-colors group">
+                          <span className="text-indigo-400 font-bold whitespace-nowrap">{log.time}</span>
+                          <span className="flex-1 text-slate-600 line-clamp-1 group-hover:line-clamp-none transition-all">{log.msg}</span>
+                          <span className={`font-bold ${log.code === 'WARN' ? 'text-amber-500' : log.code === 'ERROR' ? 'text-red-500' : 'text-emerald-500'}`}>{log.code}</span>
+                       </div>
+                     ))}
+                  </div>
+               </div>
             </div>
 
             {/* Diagnostic Telemetry Flux */}
@@ -385,17 +492,32 @@ export default function SimulationPage() {
               <Terminal size={20} />
               <span className="font-body text-[11px] font-bold tracking-tight">Input</span>
             </button>
+            {project.status === 'ready' ? (
+              <a 
+                href={project.dataset_url} 
+                target="_blank" 
+                rel="noreferrer"
+                className="flex flex-col items-center justify-center rounded-xl p-3 px-6 transition-all scale-105 shadow-xl shadow-emerald-500/20 bg-emerald-500 text-white hover:bg-emerald-600 animate-bounce"
+              >
+                <Plus size={20} className="rotate-45" />
+                <span className="font-headline text-[11px] font-bold tracking-tight mt-1">Download Out</span>
+              </a>
+            ) : (
+              <button 
+                onClick={handleStartSimulation}
+                disabled={actionLoading}
+                className={`flex flex-col items-center justify-center rounded-xl p-3 px-6 transition-all scale-105 shadow-lg ${isActive ? 'bg-emerald-50 text-emerald-600 ring-1 ring-emerald-500/50' : 'bg-primary text-white hover:bg-primary/90'}`}
+              >
+                {isActive ? <Activity size={20} className="animate-pulse" /> : <Zap size={20} />}
+                <span className="font-headline text-[11px] font-bold tracking-tight mt-1">{isActive ? 'Simulating...' : 'Initialize'}</span>
+              </button>
+            )}
             <button 
-              onClick={handleStartSimulation}
-              disabled={isActive || actionLoading}
-              className={`flex flex-col items-center justify-center rounded-xl p-3 px-6 transition-all scale-105 shadow-lg ${isActive ? 'bg-emerald-50 text-emerald-600 ring-1 ring-emerald-500/50' : 'bg-primary text-white hover:bg-primary/90'}`}
+              onClick={handleReset}
+              className="flex flex-col items-center justify-center text-slate-400 p-2 hover:bg-red-50 hover:text-red-500 transition-all rounded-xl"
             >
-              {isActive ? <Activity size={20} className="animate-pulse" /> : <Zap size={20} />}
-              <span className="font-headline text-[11px] font-bold tracking-tight mt-1">{isActive ? 'Simulating...' : 'Initialize'}</span>
-            </button>
-            <button className="flex flex-col items-center justify-center text-slate-400 p-2 hover:bg-slate-100 transition-all rounded-xl">
               <Radio size={20} />
-              <span className="font-body text-[11px] font-bold tracking-tight">Broadcast</span>
+              <span className="font-body text-[11px] font-bold tracking-tight">Reset Core</span>
             </button>
           </div>
 

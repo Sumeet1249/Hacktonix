@@ -1,4 +1,5 @@
 import axios from "axios";
+import { supabase } from "./supabase";
 
 const BASE_URL = process.env.REACT_APP_API_URL || "http://localhost:8000";
 
@@ -55,24 +56,102 @@ export interface DatasetResponse {
 
 // ─── Project API ─────────────────────────────────────────────────────────────
 
-export const createProject = (name: string, description?: string) =>
-  api.post<Project>("/api/projects", { name, description }).then((r) => r.data);
+export const createProject = async (name: string, description?: string) => {
+  const { data: { user } } = await supabase.auth.getUser();
+  const { data, error } = await supabase
+    .from('projects')
+    .insert([{ 
+      name, 
+      description, 
+      owner_id: user?.id,
+      status: "created",
+      progress: 0
+    }])
+    .select()
+    .single();
+  
+  if (error) throw error;
+  return data as Project;
+};
 
-export const listProjects = () =>
-  api.get<Project[]>("/api/projects").then((r) => r.data);
+export const listProjects = async () => {
+  const { data, error } = await supabase
+    .from('projects')
+    .select('*')
+    .order('created_at', { ascending: false });
+  
+  if (error) throw error;
+  return data as Project[];
+};
 
-export const getProject = (id: string) =>
-  api.get<Project>(`/api/projects/${id}`).then((r) => r.data);
+export const getProject = async (id: string) => {
+  const { data, error } = await supabase
+    .from('projects')
+    .select('*')
+    .eq('id', id)
+    .single();
+  
+  if (error) throw error;
+  return data as Project;
+};
 
-export const deleteProject = (id: string) =>
-  api.delete(`/api/projects/${id}`).then((r) => r.data);
+export const deleteProject = async (id: string) => {
+  const { error } = await supabase
+    .from('projects')
+    .delete()
+    .eq('id', id);
+  
+  if (error) throw error;
+  return { deleted: true };
+};
 
-export const uploadSeedImages = (projectId: string, files: File[]) => {
-  const form = new FormData();
-  files.forEach((f) => form.append("files", f));
-  return api.post(`/api/projects/${projectId}/seed-images`, form, {
-    headers: { "Content-Type": "multipart/form-data" },
-  }).then((r) => r.data);
+export const uploadSeedImages = async (projectId: string, files: File[]) => {
+  const uploadedImages: { id: string; filename: string; url: string }[] = [];
+
+  for (const file of files) {
+    const fileExt = file.name.split('.').pop();
+    const fileName = `${Math.random()}.${fileExt}`;
+    const filePath = `${projectId}/${fileName}`;
+
+    // 1. Upload to Supabase Storage
+    const { error: uploadError } = await supabase.storage
+      .from('project-seeds')
+      .upload(filePath, file);
+
+    if (uploadError) throw uploadError;
+
+    // 2. Get Public URL
+    const { data: { publicUrl } } = supabase.storage
+      .from('project-seeds')
+      .getPublicUrl(filePath);
+
+    uploadedImages.push({
+      id: Math.random().toString(36).substring(7),
+      filename: file.name,
+      url: publicUrl
+    });
+  }
+
+  // 3. Update Project metadata in DB
+  // First get existing images to append
+  const { data: project } = await supabase
+    .from('projects')
+    .select('seed_images')
+    .eq('id', projectId)
+    .single();
+
+  const currentImages = project?.seed_images || [];
+  const { error: updateError } = await supabase
+    .from('projects')
+    .update({ 
+      seed_images: [...currentImages, ...uploadedImages],
+      image_count: currentImages.length + uploadedImages.length
+    })
+    .eq('id', projectId);
+
+  if (updateError) throw updateError;
+  
+  return { success: true };
 };
 
 export const setModelEndpoint = (projectId: string, endpoint: string) =>
@@ -87,8 +166,24 @@ export const runAdversarialScan = (projectId: string) =>
 export const triggerGeneration = (projectId: string) =>
   api.post(`/api/projects/${projectId}/generate`).then((r) => r.data);
 
-export const getStatus = (projectId: string) =>
-  api.get<StatusResponse>(`/api/projects/${projectId}/status`).then((r) => r.data);
+export const getStatus = async (projectId: string): Promise<StatusResponse> => {
+  const { data, error } = await supabase
+    .from('projects')
+    .select('id, status, progress, current_stage, image_count, label_count, error_message')
+    .eq('id', projectId)
+    .single();
+  
+  if (error) throw error;
+  return {
+    project_id: data.id,
+    status: data.status,
+    progress: data.progress,
+    current_stage: data.current_stage,
+    image_count: data.image_count || 0,
+    label_count: data.label_count || 0,
+    error_message: data.error_message
+  };
+};
 
 export const getDataset = (projectId: string) =>
   api.get<DatasetResponse>(`/api/projects/${projectId}/dataset`).then((r) => r.data);

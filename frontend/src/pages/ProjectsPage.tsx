@@ -1,12 +1,13 @@
-import React, { useState, useMemo } from "react";
-import { Link, useNavigate } from "react-router-dom";
-import { useProjects } from "../hooks/useProject";
-import { createProject, deleteProject, uploadSeedImages } from "../api/client";
-import { Plus, Trash2, Eye, History, Shield, FolderOpen, Bell, Settings, Terminal, Mic, Send, TrendingUp, AlertTriangle, Zap } from "lucide-react";
+import React, { useState, useEffect, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
+import { supabase } from "../api/supabase";
+import { Plus, Trash2, Shield, FolderOpen, Terminal, Mic, Send, TrendingUp, AlertTriangle, Zap, LogOut, History, Settings } from "lucide-react";
 import TopNavBar from "../components/TopNavBar";
+import { listProjects, createProject, deleteProject } from "../api/client";
 
 export default function ProjectsPage() {
-  const { projects, loading, refetch } = useProjects();
+  const [projects, setProjects] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
   
   const [showForm, setShowForm] = useState(false);
@@ -15,40 +16,74 @@ export default function ProjectsPage() {
   const [description, setDescription] = useState("");
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
 
-  const stats = useMemo(() => {
-    return {
-      totalModels: projects.length,
-      vulnerabilities: projects.reduce((acc, p) => acc + (p.vulnerability_vector ? Object.keys(p.vulnerability_vector).length : 0), 0),
-      totalImages: projects.reduce((acc, p) => acc + (p.image_count || 0), 0),
-      totalLabels: projects.reduce((acc, p) => acc + (p.label_count || 0), 0),
-    };
-  }, [projects]);
+  const fetchProjectsData = async () => {
+    setLoading(true);
+    try {
+      const data = await listProjects();
+      setProjects(data);
+    } catch (err) {
+      console.error("Failed to fetch projects:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchProjectsData();
+  }, []);
+
+  const stats = useMemo(() => ({
+    totalModels: projects.length,
+    vulnerabilities: 0, // We will calculate this later from the simulations table
+    totalImages: 0,
+    totalLabels: 0,
+  }), [projects]);
 
   const handleCreate = async () => {
     if (!name.trim()) return;
     setCreating(true);
+    
     try {
-      const project = await createProject(name.trim(), description.trim() || undefined);
+      const newProject = await createProject(name.trim(), description.trim());
+      
+      // Upload files if selected
       if (selectedFiles.length > 0) {
-        await uploadSeedImages(project.id, selectedFiles);
+        try {
+          const { uploadSeedImages } = await import("../api/client");
+          await uploadSeedImages(newProject.id, selectedFiles);
+        } catch (uploadErr) {
+          console.error("Initial data ingestion failed:", uploadErr);
+        }
       }
+
+      setProjects([newProject, ...projects]);
       setShowForm(false);
       setName("");
       setDescription("");
       setSelectedFiles([]);
-      navigate(`/projects/${project.id}`);
-    } catch (e) {
-      alert("Failed to create project");
+      navigate(`/projects/${newProject.id}`);
+    } catch (err) {
+      alert("Failed to initialize node. Check network clearance.");
     } finally {
       setCreating(false);
     }
   };
 
-  const handleDelete = async (e: React.MouseEvent, id: string) => {
+  const handleDeleteProj = async (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
     if (!window.confirm("Delete this project and all its data?")) return;
-    await deleteProject(id);
-    refetch();
+    
+    try {
+      await deleteProject(id);
+      setProjects(projects.filter(p => p.id !== id));
+    } catch (err) {
+      alert("Clearance denied for deletion.");
+    }
+  };
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    navigate('/');
   };
 
   return (
@@ -89,7 +124,7 @@ export default function ProjectsPage() {
                 <span className="font-headline uppercase tracking-widest text-[10px] truncate">{p.name}</span>
               </div>
               <button 
-                onClick={(e) => handleDelete(e, p.id)}
+                onClick={(e) => handleDeleteProj(e, p.id)}
                 className="opacity-0 group-hover:opacity-100 text-error hover:scale-110 transition-all"
               >
                 <Trash2 size={12} />
@@ -98,11 +133,21 @@ export default function ProjectsPage() {
           ))}
         </nav>
 
-        <div className="mt-auto p-4 flex items-center gap-3 bg-white/50 border border-slate-200/20 rounded-xl">
-          <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center text-white text-[10px] font-bold">X</div>
-          <div className="overflow-hidden">
-            <p className="text-xs font-bold truncate text-slate-900">Operator 07-X</p>
-            <p className="text-[10px] text-slate-500 truncate uppercase tracking-tighter">Level 4 Clearance</p>
+        <div className="mt-auto space-y-4">
+          <button 
+            onClick={handleLogout}
+            className="w-full flex items-center gap-3 text-slate-400 px-4 py-2 hover:text-error transition-all rounded-lg group"
+          >
+            <LogOut size={16} className="group-hover:scale-110 transition-transform" />
+            <span className="font-headline uppercase tracking-widest text-[10px]">Sign Out</span>
+          </button>
+
+          <div className="p-4 flex items-center gap-3 bg-white/50 border border-slate-200/20 rounded-xl">
+            <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center text-white text-[10px] font-bold">X</div>
+            <div className="overflow-hidden">
+              <p className="text-xs font-bold truncate text-slate-900">Operator 07-X</p>
+              <p className="text-[10px] text-slate-500 truncate uppercase tracking-tighter">Level 4 Clearance</p>
+            </div>
           </div>
         </div>
       </aside>

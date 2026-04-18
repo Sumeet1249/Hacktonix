@@ -1,15 +1,16 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
-import { useProject } from "../hooks/useProject";
+import { supabase } from "../api/supabase";
 import { runAdversarialScan, setModelEndpoint, uploadSeedImages } from "../api/client";
-import { ArrowLeft, Plus, History, Shield, FolderOpen, Bell, Settings, Terminal, Mic, Send, Zap, CheckCircle, AlertTriangle, Scan } from "lucide-react";
+import { ArrowLeft, Plus, History, Shield, FolderOpen, Bell, Settings, Terminal, Mic, Send, Zap, CheckCircle, AlertTriangle, Scan, LogOut } from "lucide-react";
 import TopNavBar from "../components/TopNavBar";
 import { ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts';
+import { useProject } from "../hooks/useProject";
 
 export default function ProjectDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { project, status, loading, error, refetch } = useProject(id!, 3000);
+  const { project, loading, refetch } = useProject(id!, 3000);
   const [actionLoading, setActionLoading] = useState(false);
   const [modelUrl, setModelUrl] = useState("");
 
@@ -28,13 +29,13 @@ export default function ProjectDetailPage() {
   };
 
   if (loading) return <div className="min-h-screen bg-[#f7f9fb] flex items-center justify-center font-headline uppercase tracking-widest text-xs text-primary animate-pulse">Initializing Telemetry...</div>;
-  if (!project) return <div className="min-h-screen bg-[#f7f9fb] flex items-center justify-center"><button onClick={() => navigate('/projects')}>Node Not Found - Return</button></div>;
+  if (!project) return <div className="min-h-screen bg-[#f7f9fb] flex items-center justify-center font-technical p-10"><div className="text-center"><p className="mb-4 text-slate-400 uppercase tracking-widest">Node Not Found</p><button className="bg-primary text-white px-6 py-2 rounded-full font-bold" onClick={() => navigate('/projects')}>Return to Dashboard</button></div></div>;
 
   return (
     <div className="bg-[#f7f9fb] text-[#191c1e] font-body min-h-screen selection:bg-primary-fixed selection:text-on-primary-fixed">
       {/* SIDE NAV BAR */}
       <aside className="fixed left-0 top-0 h-full w-64 border-r border-slate-200/20 bg-white/70 backdrop-blur-xl z-50 flex flex-col p-4 shadow-[0_0_40px_rgba(38,58,97,0.05)]">
-        <div className="mb-10 px-4 cursor-pointer" onClick={() => navigate('/')}>
+        <div className="mb-10 px-4 cursor-pointer" onClick={() => navigate('/projects')}>
           <h1 className="text-xl font-display tracking-tight text-slate-900">AxiomSynth</h1>
           <p className="font-technical uppercase tracking-extrawide text-[9px] text-slate-500">AI Defense Core</p>
         </div>
@@ -247,13 +248,13 @@ export default function ProjectDetailPage() {
             <div className="bg-white/70 glass-panel shadow-[0_0_40px_rgba(38,58,97,0.05)] border border-indigo-500/10 rounded-xl p-8">
               <h3 className="font-headline text-lg font-bold text-primary mb-1">Source Data</h3>
               <p className="text-[11px] text-slate-400 uppercase tracking-widest mb-5">
-                {project.seed_images.length} images · Coverage {Math.min(project.seed_images.length * 10, 100)}%
+                {project.seed_images?.length || 0} images · Coverage {Math.min((project.seed_images?.length || 0) * 10, 100)}%
               </p>
 
               {/* Uploaded Images Preview */}
-              {project.seed_images.length > 0 && (
+              {(project.seed_images?.length || 0) > 0 && (
                 <div className="grid grid-cols-3 gap-2 mb-5">
-                  {project.seed_images.slice(0, 6).map((img) => (
+                  {project.seed_images?.slice(0, 6).map((img: any) => (
                     <div key={img.id} className="aspect-square rounded-lg overflow-hidden bg-slate-100 border border-indigo-100">
                       <img src={img.url} alt={img.filename} className="w-full h-full object-cover" />
                     </div>
@@ -280,7 +281,7 @@ export default function ProjectDetailPage() {
                   }
                 }}
               />
-              <button
+              <div
                 onClick={() => document.getElementById('seed-upload')?.click()}
                 className="w-full border-2 border-dashed border-indigo-200 hover:border-indigo-400 bg-indigo-50/50 hover:bg-indigo-50 rounded-xl p-6 flex flex-col items-center gap-2 transition-all group cursor-pointer"
               >
@@ -289,7 +290,7 @@ export default function ProjectDetailPage() {
                   Upload Photos
                 </p>
                 <p className="text-[10px] text-slate-400">JPG, PNG supported</p>
-              </button>
+              </div>
             </div>
 
             {/* Component 2: Model Structure Probe */}

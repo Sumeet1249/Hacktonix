@@ -12,18 +12,18 @@ const LandingPage = () => {
           <div className="text-xl font-bold tracking-[-0.02em] text-slate-900">AxiomSynth</div>
           <div className="hidden md:flex items-center gap-8">
             <Link className="text-slate-900 border-b-2 border-slate-900 pb-1 transition-colors duration-300" to="/">Overview</Link>
-            <Link className="text-slate-500 font-medium hover:text-slate-900 transition-colors duration-300" to="/projects">Probing</Link>
-            <Link className="text-slate-500 font-medium hover:text-slate-900 transition-colors duration-300" to="#">Simulation</Link>
-            <Link className="text-slate-500 font-medium hover:text-slate-900 transition-colors duration-300" to="#">Datasets</Link>
+            <Link className="text-slate-500 font-medium hover:text-slate-900 transition-colors duration-300" to="/projects">Dashboard</Link>
+            {/* <Link className="text-slate-500 font-medium hover:text-slate-900 transition-colors duration-300" to="#">Simulation</Link> */}
+            {/* <Link className="text-slate-500 font-medium hover:text-slate-900 transition-colors duration-300" to="#">Datasets</Link> */}
           </div>
-          <div className="flex items-center gap-4">
-            <button className="text-slate-500 font-medium hover:text-slate-900 transition-colors">Sign In</button>
-            <button 
-              onClick={() => navigate('/projects')}
-              className="bg-[#263a61] text-white px-5 py-2 rounded-lg font-bold scale-95 active:opacity-80 transition-transform"
+          <div className="flex items-center gap-6">
+            <Link to="/signin" className="text-slate-500 font-medium hover:text-slate-900 transition-colors">Sign In</Link>
+            <Link 
+              to="/signup"
+              className="bg-slate-900 text-white px-6 py-2.5 rounded-full font-bold shadow-lg shadow-slate-900/10 hover:scale-105 active:scale-95 transition-all text-xs uppercase tracking-widest"
             >
               Get Started
-            </button>
+            </Link>
           </div>
         </div>
       </nav>

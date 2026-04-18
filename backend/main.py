@@ -15,15 +15,30 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from sqlalchemy.orm import Session
 
-from models import (
-    init_db, get_db, Project, SeedImage, GeneratedImage,
-    ProjectStatus, SessionLocal
-)
 from storage import upload_bytes, get_presigned_url, ensure_bucket, upload_file
 from tasks import celery_app, train_lora_task, full_pipeline_task
+import httpx
 from services.adversarial_agent import run_vulnerability_scan, STRESSORS
+
+SUPABASE_URL = "https://cauhevaqfmqprdgfsikl.supabase.co"
+SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNhdWhldmFxZm1xcHJkZ2ZzaWtsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY1MDUxMzQsImV4cCI6MjA5MjA4MTEzNH0.lq5iWeZrqAv-KKF_Nu6IveEC9pQ7MrmR8vAGQSHfo7c"
+
+def sync_supabase(method, table, data=None, params=None):
+    headers = {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "Content-Type": "application/json",
+        "Prefer": "return=minimal"
+    }
+    url = f"{SUPABASE_URL}/rest/v1/{table}"
+    with httpx.Client() as client:
+        if method == "GET":
+            return client.get(url, headers=headers, params=params).json()
+        elif method == "PATCH":
+            return client.patch(url, headers=headers, params=params, json=data)
+        elif method == "POST":
+            return client.post(url, headers=headers, json=data)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -31,10 +46,9 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("Starting BlindSpot.AI API...")
-    init_db()
-    ensure_bucket()
+    # Startup: Ensure cloud connections
     yield
+    # Shutdown: Clean up any open streams
     logger.info("Shutting down BlindSpot.AI API")
 
 
@@ -90,28 +104,6 @@ class ProjectResponse(BaseModel):
         from_attributes = True
 
 
-def _project_to_dict(p: Project) -> dict:
-    return {
-        "id": p.id,
-        "name": p.name,
-        "description": p.description,
-        "status": p.status.value if p.status else "created",
-        "progress": p.progress or 0,
-        "current_stage": p.current_stage,
-        "model_endpoint": p.model_endpoint,
-        "vulnerability_vector": p.vulnerability_vector,
-        "dataset_url": p.dataset_url,
-        "image_count": p.image_count or 0,
-        "label_count": p.label_count or 0,
-        "seed_images": [
-            {"id": si.id, "filename": si.filename, "url": si.url}
-            for si in p.seed_images
-        ],
-        "created_at": p.created_at.isoformat() if p.created_at else None,
-        "updated_at": p.updated_at.isoformat() if p.updated_at else None,
-    }
-
-
 # ─── Projects ─────────────────────────────────────────────────────────────────
 
 @app.get("/api/health")
@@ -120,231 +112,258 @@ def health():
 
 
 @app.post("/api/projects")
-def create_project(body: ProjectCreate, db: Session = Depends(get_db)):
-    project = Project(
-        id=str(uuid.uuid4()),
-        name=body.name,
-        description=body.description,
-        status=ProjectStatus.CREATED,
-        progress=0,
-    )
-    db.add(project)
-    db.commit()
-    db.refresh(project)
-    logger.info(f"Created project: {project.id} — {project.name}")
-    return _project_to_dict(project)
+def create_project_endpoint(body: ProjectCreate):
+    data = sync_supabase("POST", "projects", data={
+        "name": body.name,
+        "description": body.description,
+        "status": "created",
+        "progress": 0
+    })
+    if not data:
+        raise HTTPException(status_code=500, detail="Failed to create project in cloud")
+    return data[0]
 
 
 @app.get("/api/projects")
-def list_projects(db: Session = Depends(get_db)):
-    projects = db.query(Project).order_by(Project.created_at.desc()).all()
-    return [_project_to_dict(p) for p in projects]
+def list_projects_endpoint():
+    data = sync_supabase("GET", "projects", params={"order": "created_at.desc"})
+    return data or []
 
 
 @app.get("/api/projects/{project_id}")
-def get_project(project_id: str, db: Session = Depends(get_db)):
-    project = db.query(Project).filter(Project.id == project_id).first()
-    if not project:
+def get_project_endpoint(project_id: str):
+    data = sync_supabase("GET", "projects", params={"id": f"eq.{project_id}", "select": "*"})
+    if not data:
         raise HTTPException(status_code=404, detail="Project not found")
-    return _project_to_dict(project)
+    return data[0]
 
 
 @app.delete("/api/projects/{project_id}")
-def delete_project(project_id: str, db: Session = Depends(get_db)):
-    project = db.query(Project).filter(Project.id == project_id).first()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
-    db.delete(project)
-    db.commit()
+def delete_project_endpoint(project_id: str):
+    sync_supabase("DELETE", "projects", params={"id": f"eq.{project_id}"})
     return {"deleted": True}
 
 
 # ─── Seed Images ──────────────────────────────────────────────────────────────
 
 @app.post("/api/projects/{project_id}/seed-images")
-async def upload_seed_images(
+async def upload_seed_images_endpoint(
     project_id: str,
     files: List[UploadFile] = File(...),
-    db: Session = Depends(get_db),
 ):
-    project = db.query(Project).filter(Project.id == project_id).first()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
-
-    if len(files) < 1 or len(files) > 10:
-        raise HTTPException(status_code=400, detail="Upload between 1 and 10 seed images")
-
+    # This is a fallback; frontend now uploads to Supabase Storage directly.
+    # But let's keep it working via sync_supabase for completeness.
     uploaded = []
     for file in files:
         data = await file.read()
         ext = Path(file.filename).suffix or ".jpg"
-        storage_key = f"seeds/{project_id}/{uuid.uuid4().hex}{ext}"
-        upload_bytes(data, storage_key, content_type=file.content_type or "image/jpeg")
-        url = get_presigned_url(storage_key)
+        storage_key = f"{project_id}/{uuid.uuid4().hex}{ext}"
+        
+        # Upload using same bucket
+        upload_bytes(data, f"project-seeds/{storage_key}", content_type=file.content_type)
+        url = f"{SUPABASE_URL}/storage/v1/object/public/project-seeds/{storage_key}"
 
-        seed = SeedImage(
-            project_id=project_id,
-            filename=file.filename,
-            storage_key=storage_key,
-            url=url,
-        )
-        db.add(seed)
-        uploaded.append({"filename": file.filename, "storage_key": storage_key, "url": url})
+        uploaded.append({"filename": file.filename, "url": url})
 
-    db.commit()
-    logger.info(f"Uploaded {len(uploaded)} seed images to project {project_id}")
+    # Update metadata in 프로젝트 table
+    curr_data = sync_supabase("GET", "projects", params={"id": f"eq.{project_id}", "select": "seed_images"})
+    existing = (curr_data[0].get("seed_images") or []) if curr_data else []
+    
+    sync_supabase("PATCH", "projects", 
+        data={
+            "seed_images": existing + uploaded,
+            "image_count": len(existing) + len(uploaded)
+        },
+        params={"id": f"eq.{project_id}"}
+    )
+    
     return {"uploaded": len(uploaded), "images": uploaded}
 
 
 # ─── Model Endpoint ───────────────────────────────────────────────────────────
 
 @app.post("/api/projects/{project_id}/model-endpoint")
-def set_model_endpoint(project_id: str, body: ModelEndpointRequest, db: Session = Depends(get_db)):
-    project = db.query(Project).filter(Project.id == project_id).first()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
-    project.model_endpoint = body.endpoint
-    db.commit()
-    return {"endpoint": body.endpoint, "message": "Model endpoint registered"}
+def set_model_endpoint(project_id: str, body: ModelEndpointRequest):
+    # Update Supabase
+    sync_supabase("PATCH", "projects", 
+        data={"model_endpoint": body.endpoint},
+        params={"id": f"eq.{project_id}"}
+    )
+    return {"endpoint": body.endpoint, "message": "Model endpoint registered in cloud"}
 
 
 # ─── LoRA Training ────────────────────────────────────────────────────────────
 
 @app.post("/api/projects/{project_id}/train-lora")
-def trigger_lora_training(project_id: str, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
-    project = db.query(Project).filter(Project.id == project_id).first()
-    if not project:
+def trigger_lora_training(project_id: str, background_tasks: BackgroundTasks):
+    data = sync_supabase("GET", "projects", params={"id": f"eq.{project_id}", "select": "seed_images"})
+    if not data:
         raise HTTPException(status_code=404, detail="Project not found")
-    if not project.seed_images:
+    
+    project = data[0]
+    seed_images = project.get("seed_images", [])
+    if not seed_images:
         raise HTTPException(status_code=400, detail="No seed images uploaded")
 
-    storage_keys = [si.storage_key for si in project.seed_images]
+    storage_keys = [si.get("storage_key", "") for si in seed_images]
     background_tasks.add_task(train_lora_task.delay, project_id, storage_keys)
-    project.celery_task_id = "local-bg-task-lora"
-    project.status = ProjectStatus.TRAINING_LORA
-    db.commit()
+    
+    sync_supabase("PATCH", "projects", 
+        data={
+            "status": "training_lora",
+            "current_stage": "Starting LoRA training..."
+        },
+        params={"id": f"eq.{project_id}"}
+    )
 
-    return {"task_id": "local-bg-task-lora", "message": "LoRA training started"}
+    return {"task_id": "local-bg-task-lora", "message": "LoRA training started via cloud-sync"}
 
 
 # ─── Adversarial Scan ─────────────────────────────────────────────────────────
 
 def run_scan_bg(project_id, model_endpoint, seed_paths):
-    from models import SessionLocal
     try:
         v_vec = run_vulnerability_scan(project_id, model_endpoint, seed_paths)
-        db = SessionLocal()
-        p = db.query(Project).filter(Project.id == project_id).first()
-        if p:
-            p.vulnerability_vector = v_vec
-            p.status = ProjectStatus.CREATED
-            p.current_stage = f"Scan complete — {len(v_vec)} blind spots found"
-            db.commit()
-        db.close()
+        # Update Supabase project with results
+        sync_supabase("PATCH", "projects", 
+            data={
+                "vulnerability_vector": v_vec,
+                "status": "ready",
+                "current_stage": f"Scan complete — {len(v_vec)} blind spots found"
+            },
+            params={"id": f"eq.{project_id}"}
+        )
     except Exception as e:
         logger.error(f"Scan failed: {e}")
+        sync_supabase("PATCH", "projects", 
+            data={
+                "status": "ready",
+                "error_message": str(e)
+            },
+            params={"id": f"eq.{project_id}"}
+        )
 
 @app.post("/api/projects/{project_id}/run-adversarial-scan")
-def run_adversarial_scan_endpoint(project_id: str, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
-    project = db.query(Project).filter(Project.id == project_id).first()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+def run_adversarial_scan_endpoint(project_id: str, background_tasks: BackgroundTasks):
+    # Fetch project from Supabase
+    data = sync_supabase("GET", "projects", params={"id": f"eq.{project_id}", "select": "*"})
+    if not data:
+        raise HTTPException(status_code=404, detail="Project not found in Supabase")
+    
+    project = data[0]
+    
+    # Update status to scanning
+    sync_supabase("PATCH", "projects", 
+        data={
+            "status": "scanning",
+            "current_stage": "Running adversarial scan..."
+        },
+        params={"id": f"eq.{project_id}"}
+    )
 
-    project.status = ProjectStatus.SCANNING
-    project.current_stage = "Running adversarial scan..."
-    db.commit()
-
+    # Prepare seeds
     seed_paths = []
-    tmp_dir = Path("/tmp") / f"scan_{project_id}"
-    tmp_dir.mkdir(exist_ok=True)
+    tmp_dir = Path("data") / f"scan_{project_id}"
+    tmp_dir.mkdir(parents=True, exist_ok=True)
 
-    from storage import download_file
-    for i, si in enumerate(project.seed_images[:5]):
-        local = str(tmp_dir / f"seed_{i}.jpg")
-        try:
-            download_file(si.storage_key, local)
-            seed_paths.append(local)
-        except Exception as e:
-            logger.warning(f"Could not download seed image: {e}")
+    with httpx.Client() as client:
+        # Get seeds from the project metadata we just fetched
+        for i, si in enumerate(project.get("seed_images", [])[:5]):
+            local = str(tmp_dir / f"seed_{i}.jpg")
+            try:
+                r = client.get(si["url"])
+                if r.status_code == 200:
+                    with open(local, "wb") as f:
+                        f.write(r.content)
+                    seed_paths.append(local)
+            except Exception as e:
+                logger.warning(f"Could not download seed image: {e}")
 
-    background_tasks.add_task(run_scan_bg, project_id, project.model_endpoint or "", seed_paths)
+    background_tasks.add_task(run_scan_bg, project_id, project.get("model_endpoint") or "", seed_paths)
 
-    return {"message": "Scan started in background"}
+    return {"message": "Scan started via Supabase"}
 
 
 # ─── Full Generation Pipeline ─────────────────────────────────────────────────
 
+@app.patch("/api/projects/{project_id}/status")
+def update_project_status(project_id: str, payload: dict):
+    # Pass updates directly to Supabase via sync_supabase helper
+    try:
+        data = sync_supabase("PATCH", "projects", 
+            data=payload,
+            params={"id": f"eq.{project_id}"}
+        )
+        return {"status": "success", "updated": data}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/api/projects/{project_id}/generate")
-def trigger_generation(project_id: str, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
-    project = db.query(Project).filter(Project.id == project_id).first()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+def trigger_generation(project_id: str, background_tasks: BackgroundTasks):
+    # Verify project exists in Supabase
+    data = sync_supabase("GET", "projects", params={"id": f"eq.{project_id}", "select": "id"})
+    if not data:
+        raise HTTPException(status_code=404, detail="Project not found in Supabase")
 
     background_tasks.add_task(full_pipeline_task.delay, project_id)
-    project.celery_task_id = "local-bg-task-gen"
-    project.status = ProjectStatus.GENERATING
-    project.progress = 0
-    project.current_stage = "Pipeline queued..."
-    db.commit()
+    
+    sync_supabase("PATCH", "projects", 
+        data={
+            "status": "generating",
+            "progress": 0,
+            "current_stage": "Pipeline queued in cloud..."
+        },
+        params={"id": f"eq.{project_id}"}
+    )
 
-    return {"task_id": "local-bg-task-gen", "message": "Generation pipeline started"}
+    return {"message": "Generation pipeline started via cloud-sync"}
 
 
 # ─── Status ───────────────────────────────────────────────────────────────────
 
 @app.get("/api/projects/{project_id}/status")
-def get_status(project_id: str, db: Session = Depends(get_db)):
-    project = db.query(Project).filter(Project.id == project_id).first()
-    if not project:
+def get_status(project_id: str):
+    data = sync_supabase("GET", "projects", params={"id": f"eq.{project_id}", "select": "*"})
+    if not data:
         raise HTTPException(status_code=404, detail="Project not found")
-
-    celery_state = None
-    if project.celery_task_id:
-        try:
-            # If eager mode, this might throw NotImplementedError without backend
-            task_result = celery_app.AsyncResult(project.celery_task_id)
-            celery_state = task_result.state
-        except Exception as e:
-            logger.warning(f"Skipping celery state fetch (local mode): {e}")
-            celery_state = "unknown"
-
+    
+    project = data[0]
     return {
         "project_id": project_id,
-        "status": project.status.value if project.status else "created",
-        "progress": project.progress or 0,
-        "current_stage": project.current_stage,
-        "celery_state": celery_state,
-        "image_count": project.image_count or 0,
-        "label_count": project.label_count or 0,
-        "error_message": project.error_message,
+        "status": project.get("status", "created"),
+        "progress": project.get("progress", 0),
+        "current_stage": project.get("current_stage"),
+        "image_count": project.get("image_count", 0),
+        "label_count": project.get("label_count", 0),
+        "error_message": project.get("error_message"),
     }
 
 
 # ─── Dataset ──────────────────────────────────────────────────────────────────
 
 @app.get("/api/projects/{project_id}/dataset")
-def get_dataset(project_id: str, db: Session = Depends(get_db)):
-    project = db.query(Project).filter(Project.id == project_id).first()
-    if not project:
+def get_dataset(project_id: str):
+    data = sync_supabase("GET", "projects", params={"id": f"eq.{project_id}", "select": "*"})
+    if not data:
         raise HTTPException(status_code=404, detail="Project not found")
-    if project.status != ProjectStatus.READY:
+    
+    project = data[0]
+    if project.get("status") != "ready":
         raise HTTPException(status_code=400, detail="Dataset not ready yet")
 
     # Refresh presigned URL
     storage_key = f"datasets/{project_id}/dataset_{project_id}.zip"
     try:
         fresh_url = get_presigned_url(storage_key, expiry=3600)
-        project.dataset_url = fresh_url
-        db.commit()
     except Exception:
-        fresh_url = project.dataset_url
+        fresh_url = project.get("dataset_url")
 
     return {
         "project_id": project_id,
         "download_url": fresh_url,
-        "image_count": project.image_count,
-        "label_count": project.label_count,
-        "vulnerability_vector": project.vulnerability_vector,
+        "image_count": project.get("image_count", 0),
+        "label_count": project.get("label_count", 0),
+        "vulnerability_vector": project.get("vulnerability_vector", {}),
         "format": "COCO JSON + YOLO labels",
         "expires_in_seconds": 3600,
     }

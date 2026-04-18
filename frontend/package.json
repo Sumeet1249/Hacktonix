@@ -4,6 +4,8 @@
   "private": true,
   "dependencies": {
     "@fontsource/ibm-plex-mono": "^5.2.7",
+    "@react-oauth/google": "^0.13.5",
+    "@supabase/supabase-js": "^2.103.3",
     "ajv": "^8.18.0",
     "axios": "^1.7.2",
     "clsx": "^2.1.1",
